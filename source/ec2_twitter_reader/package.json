@@ -7,7 +7,7 @@
     "pretest": "npm install",
     "test": "mocha *.spec.js",
     "build-init": "rm -rf dist && mkdir dist && mkdir dist/util",
-    "build:copy": "cp config.js dist/ && cp twitter_stream_producer_app.js dist/ && cp twitter_stream_producer.js dist/ && cp -r util dist/",
+    "build:copy": "cp twitter_stream_producer_app.js dist/ && cp twitter_stream_producer.js dist/ && cp -r util dist/",
     "build:install": "cp package.json dist/ && cd dist && npm install --production",
     "build": "npm-run-all -s build-init build:copy build:install",
     "tar": "cd dist && tar -cvf ec2_twitter_reader.tar *"

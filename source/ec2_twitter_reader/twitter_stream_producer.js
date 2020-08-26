@@ -16,49 +16,109 @@ permissions and limitations under the License.
 'use strict';
 
 var config = require('./config');
-var twitter_config = require('./twitter_reader_config.js');
 var Twit = require('twit');
 var util = require('util');
 var logger = require('./util/logger');
 
-function twitterStreamProducer(firehose) {
-  var log = logger().getLogger('producer');
-  var waitBetweenPutRecordsCallsInMilliseconds = config.waitBetweenPutRecordsCallsInMilliseconds;
-  var T = new Twit(twitter_config.twitter)
-
-  function _sendToFirehose() {
-
-    var stream = T.stream('statuses/filter', { track: twitter_config.topics , language: twitter_config.languages });
-
-
-    var records = [];
-    var record = {};
-    var recordParams = {};
-    stream.on('tweet', function (tweet) {
-		var tweetString = JSON.stringify(tweet)
-              	recordParams = {
-                  DeliveryStreamName: twitter_config.kinesis_delivery,
-                  Record: {
-                    Data: tweetString +'\n'
-                  }
-              	};
-              firehose.putRecord(recordParams, function(err, data) {
-                if (err) {
-                  console.log(err);
-                }
-              });
-	}
-    );
-  }
-
-
-  return {
-    run: function() {
-      log.info(util.format('Configured wait between consecutive PutRecords call in milliseconds: %d',
-          waitBetweenPutRecordsCallsInMilliseconds));
-        _sendToFirehose();
-      }
-  }
+var AWS = require('aws-sdk');
+if (!AWS.config.region) {
+  AWS.config.update({
+    region: 'us-west-2'
+  });
 }
 
-module.exports = twitterStreamProducer;
+var ssm            = new AWS.SSM({region: AWS.config.region});
+var secretsmanager = new AWS.SecretsManager();
+
+
+function twitterStreamProducer(firehose) {
+  var log = logger().getLogger('producer');
+
+  var waitBetweenPutRecordsCallsInMilliseconds = 0 ;
+  var topics           = '';
+  var languages        = '';  
+
+  console.log(config);
+  var kinesis_delivery = config.kinesis_delivery;  
+  
+  var callbackMain = function(data, config){
+	var T = new Twit(config);
+    log.info(
+      util.format(
+        'Configured wait between consecutive PutRecords call in milliseconds: %d',
+        waitBetweenPutRecordsCallsInMilliseconds
+      )
+    );
+    console.log({ track: topics , language: languages });
+	var stream = T.stream('statuses/filter', { track: topics , language: languages });
+	var records = [];
+	var record = {};
+	var recordParams = {};
+	stream.on('tweet', function (tweet) {
+	  var tweetString = JSON.stringify(tweet);
+	  recordParams = {
+		DeliveryStreamName: kinesis_delivery,
+		Record: {
+		  Data: tweetString +'\n'
+		}
+	  };
+	  firehose.putRecord(recordParams, function(err, data) {
+		if (err) {
+		  console.log(err);
+		}
+	  });
+	  Promise.all([
+		ssm.getParameter({ Name: "TwitterTermList", WithDecryption: true}).promise(), 	
+		ssm.getParameter({ Name: "TwitterLanguages", WithDecryption: true}).promise()
+		
+	  ]).then(function(values) {
+		topics    = values[0].Parameter.Value;
+		languages = values[1].Parameter.Value;
+
+  	    stream = T.stream('statuses/filter', { track: topics , language: languages });
+	  });  
+	});	
+	stream.on('error', function (err) {
+	  console.log('Oh no')
+	})
+
+
+  }
+ 
+  Promise.all([
+    secretsmanager.getSecretValue({ SecretId: "AuthConsumerManagerSecret" }).promise(), 
+    secretsmanager.getSecretValue({ SecretId: "AuthConsumerSecretManagerSecret" }).promise(), 
+    secretsmanager.getSecretValue({ SecretId: "AuthAccessTokenManagerSecret" }).promise(), 
+    secretsmanager.getSecretValue({ SecretId: "AuthAccessTokenSecretManagerSecret" }).promise(), 
+	
+    ssm.getParameter({ Name: "WaitBetweenPutRecordsCallsInMilliseconds", WithDecryption: true}).promise(), 	
+    ssm.getParameter({ Name: "TwitterTermList", WithDecryption: true}).promise(), 	
+    ssm.getParameter({ Name: "TwitterLanguages", WithDecryption: true}).promise()
+    
+  ]).then(function(values) {
+    // return the result to the caller of the Lambda function
+    var config = {
+        consumer_key       : values[0].SecretString,
+        consumer_secret    : values[1].SecretString,
+        access_token       : values[2].SecretString,
+        access_token_secret: values[3].SecretString
+    }
+
+    waitBetweenPutRecordsCallsInMilliseconds = values[4].Parameter.Value;
+    topics    = values[5].Parameter.Value;
+    languages = values[6].Parameter.Value;
+	
+    callbackMain(null, config);
+  });
+}
+const twitterStreamProducerPromise = function(firehose) {
+  return new Promise((resolve, reject) => {
+	twitterStreamProducer(firehose);
+    if ( true  ) {
+      resolve("Stuff worked!");
+    } else {
+      reject(Error("It broke"));
+    }
+  });
+}
+module.exports = twitterStreamProducerPromise;

@@ -67,5 +67,28 @@ cp ./dist/ec2_twitter_reader.tar $deployment_dir/dist/ec2_twitter_reader.tar
 rm -rf dist
 rm -rf node_modules
 
+mkdir /tmp/empty
+cd /tmp/empty
+aws s3 sync . s3://$1                             --delete
+aws s3 sync . s3://$1-$(aws configure get region) --delete
+rmdir /tmp/empty
+
 # Done, so go back to deployment_dir
-cd $deployment_dir
+cd $deployment_dir	
+
+aws s3api delete-bucket --bucket $1-$(aws configure get region) --region $(aws configure get region)
+aws s3api create-bucket --bucket $1-$(aws configure get region) --region $(aws configure get region) --create-bucket-configuration LocationConstraint=$(aws configure get region)
+
+aws s3 cp $(echo $deployment_dir)/dist/addtriggerfunction.zip                      s3://$1-$(aws configure get region)/ai-driven-social-media-dashboard/$2/
+aws s3 cp $(echo $deployment_dir)/dist/ec2_twitter_reader.tar                      s3://$1-$(aws configure get region)/ai-driven-social-media-dashboard/$2/
+aws s3 cp $(echo $deployment_dir)/dist/socialmediafunction.zip                     s3://$1-$(aws configure get region)/ai-driven-social-media-dashboard/$2/
+aws s3 cp $(echo $deployment_dir)/dist/ai-driven-social-media-dashboard.template   s3://$1-$(aws configure get region)/ai-driven-social-media-dashboard/$2/
+
+
+aws s3api delete-bucket --bucket $1 --region $(aws configure get region)
+aws s3api create-bucket --bucket $1 --region $(aws configure get region) --create-bucket-configuration LocationConstraint=$(aws configure get region)
+
+aws s3 cp $(echo $deployment_dir)/dist/addtriggerfunction.zip                      s3://$1/ai-driven-social-media-dashboard/$2/
+aws s3 cp $(echo $deployment_dir)/dist/ec2_twitter_reader.tar                      s3://$1/ai-driven-social-media-dashboard/$2/
+aws s3 cp $(echo $deployment_dir)/dist/socialmediafunction.zip                     s3://$1/ai-driven-social-media-dashboard/$2/
+aws s3 cp $(echo $deployment_dir)/dist/ai-driven-social-media-dashboard.template   s3://$1/ai-driven-social-media-dashboard/$2/

@@ -25,26 +25,23 @@ Parameters:
   InstanceKeyName:
     Type: AWS::EC2::KeyPair::KeyName
     Description: The name of the private key file to use for SSH/RDP access.  You shouldn't need to do any SSH access, but just in case.
-  TwitterTermList:
-    Description: List of terms for twitter to listen to
-    Type: String
-    Default: "'AWS', 'VPC', 'EC2', 'RDS', 'S3'"
-  TwitterLanguages:
-    Description: List of languages to use for the twitter streaming reader
-    Type: String
-    Default: "'en', 'es', 'de', 'fr', 'ar', 'pt'"
+    Default: "twitter"    
   AuthConsumerKey:
     Description: Consumer key for access twitter
     Type: String
+    Default: "slcNTD4d4lf2uq4S6cYFg6mul"
   AuthConsumerSecret:
     Description: Consumer Secret for access twitter
     Type: String
+    Default: "4ZE7XcENECtjcnrPs5c7SFlZ1rPxSJyPmIAqJcIJVWxLoHaXUt"
     NoEcho: True
   AuthAccessToken:
     Description: Access Token for calling twitter
+    Default: "800221693-3qZPRhNgkd7lcOIakCdloiPEwOei7p5tRjrOJArt"
     Type: String
   AuthAccessTokenSecret:
     Description: Access Token Secret for calling twitter
+    Default: "od10nocbN5GnZR8OucqZsA1xENnHNb6HKsvJkTwDw6MrP"
     Type: String
     NoEcho: True
   ApplicationName:
@@ -63,6 +60,26 @@ Parameters:
     Description: DO NOT EDIT, looks up latest Amazon Linux AMI
     Type:  'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
     Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+  TwitterTermListParameter:
+    Description: List of terms for twitter to listen to
+    Type: String
+    Default: "AWS, VPC, EC2, RDS, S3"
+  TwitterLanguagesParameter:
+    Description: List of languages to use for the twitter streaming reader
+    Type: String
+    Default: "en, es, de, fr, ar, pt"
+  WaitBetweenDescribeCallsInSecondsParameter:
+    Description: Wait between describe calls in seconds
+    Type: Number
+    Default: 2
+  WaitBetweenPutRecordsCallsInMillisecondsParameter:
+    Description: Wait between put records calls in milliseconds
+    Type: Number
+    Default: 50
+  RecordsToWritePerBatchParameter:
+    Description: Records to write per batch
+    Type: Number
+    Default: 100
 
 Mappings:
   Function:
@@ -78,6 +95,46 @@ Mappings:
       S3Key: ai-driven-social-media-dashboard/%%VERSION%%/ec2_twitter_reader.tar
 
 Resources:
+
+  WaitBetweenDescribeCallsInSeconds:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: WaitBetweenDescribeCallsInSeconds
+      Type: String
+      Value: 
+        !Ref WaitBetweenDescribeCallsInSecondsParameter
+
+  WaitBetweenPutRecordsCallsInMilliseconds:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: WaitBetweenPutRecordsCallsInMilliseconds
+      Type: String
+      Value: 
+        !Ref WaitBetweenPutRecordsCallsInMillisecondsParameter
+
+  RecordsToWritePerBatch:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: RecordsToWritePerBatch
+      Type: String
+      Value: 
+        !Ref RecordsToWritePerBatchParameter
+
+  TwitterTermList:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: TwitterTermList
+      Type: String
+      Value: 
+        !Ref TwitterTermListParameter
+
+  TwitterLanguages:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: TwitterLanguages
+      Type: String
+      Value: 
+        !Ref TwitterLanguagesParameter
 
   AuthConsumerSecretManagerSecret:
     Type: AWS::SecretsManager::Secret
@@ -158,6 +215,15 @@ Resources:
                   - !Ref AuthAccessTokenSecretManagerSecret
                   - !Ref AuthConsumerManagerSecret
                   - !Ref AuthAccessTokenManagerSecret
+              -
+                Effect: Allow
+                Action:
+                  - 'ssm:PutParameter'
+                  - 'ssm:DescribeParameters'
+                  - 'ssm:GetParameters'
+                  - 'ssm:GetParameter'
+                Resource:
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/Twitter*"
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -263,26 +329,18 @@ Resources:
             #!/bin/bash -ex
             sleep 60
 
-            curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.32.1/install.sh | bash
+            echo "var config = module.exports = {
+              kinesis_delivery: '${KinesisIngestionFirehose}'
+            }" > /home/ec2-user/config.js
+
+            echo "curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.32.1/install.sh | bash
             export NVM_DIR="$HOME/.nvm"
             [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
             nvm install 10.15.3
             npm install --registry=https://registry.npmjs.org/
             npm install --registry=https://custom.npm.registry.com/
             npm install node-sass request@2.81.0
-
-            echo "var twitter_config = module.exports = {
-            twitter: {
-                consumer_key: '`aws secretsmanager get-secret-value --secret-id AuthConsumerManagerSecret --query SecretString --output text --region ${Region}`',
-                consumer_secret: '`aws secretsmanager get-secret-value --secret-id AuthConsumerSecretManagerSecret --query SecretString --output text --region ${Region}`',
-                access_token: '`aws secretsmanager get-secret-value --secret-id AuthAccessTokenManagerSecret --query SecretString --output text --region ${Region}`',
-                access_token_secret: '`aws secretsmanager get-secret-value --secret-id AuthAccessTokenSecretManagerSecret --query SecretString --output text --region ${Region}`'
-              },
-            topics: [${TwitterTerms}],
-            languages: [${TwitterLanguages}],
-            kinesis_delivery: '${KinesisIngestionFirehose}'
-            }" > /home/ec2-user/twitter_reader_config.js
-
+            
             wget ${EC2TwitterCode}
 
             tar --warning=no-unknown-keyword -xf ec2_twitter_reader.tar -C /home/ec2-user/
@@ -290,12 +348,10 @@ Resources:
             cd /home/ec2-user
             nohup node twitter_stream_producer_app.js &
 
-            echo "Service started."
+            echo 'Service started.'
+            " > /home/ec2-user/start.sh
           - {
               EC2TwitterCode: !Join ['', ['https://s3.', !Ref 'AWS::Region', '.amazonaws.com/', !Join ['-', [!FindInMap [ Code, EC2Twitter, S3Bucket], !Ref 'AWS::Region']], '/', !FindInMap [ Code, EC2Twitter, S3Key]]],
-              Region: !Ref 'AWS::Region',
-              TwitterTerms: !Ref TwitterTermList,
-              TwitterLanguages: !Ref TwitterLanguages ,
               KinesisIngestionFirehose: !Ref IngestionFirehoseStream
             }
 

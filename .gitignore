@@ -1,0 +1,4 @@
+
+dist
+node_modules
+source/ec2_twitter_reader/application.log
