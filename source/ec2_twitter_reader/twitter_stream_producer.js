@@ -74,7 +74,8 @@ function twitterStreamProducer(firehose) {
 	  ]).then(function(values) {
 		topics    = values[0].Parameter.Value;
 		languages = values[1].Parameter.Value;
-
+        
+        console.log({ track: topics , language: languages });
   	    stream = T.stream('statuses/filter', { track: topics , language: languages });
 	  });  
 	});	

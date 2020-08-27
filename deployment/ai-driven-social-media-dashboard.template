@@ -63,7 +63,7 @@ Parameters:
   TwitterTermListParameter:
     Description: List of terms for twitter to listen to
     Type: String
-    Default: "AWS, VPC, EC2, RDS, S3"
+    Default: "'covid schools','covid school','covid escola','covid escolas','covid école','covid écoles','covid escuela,'covid escuelas','covid schule','covid schulen'"
   TwitterLanguagesParameter:
     Description: List of languages to use for the twitter streaming reader
     Type: String
@@ -219,11 +219,9 @@ Resources:
                 Effect: Allow
                 Action:
                   - 'ssm:PutParameter'
-                  - 'ssm:DescribeParameters'
-                  - 'ssm:GetParameters'
                   - 'ssm:GetParameter'
                 Resource:
-                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/Twitter*"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/*"
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -326,30 +324,76 @@ Resources:
         Fn::Base64:
           Fn::Sub:
           - |     # No more Fn::Join needed
-            #!/bin/bash -ex
-            sleep 60
+            Content-Type: multipart/mixed; boundary="//"
+            MIME-Version: 1.0
 
-            echo "var config = module.exports = {
-              kinesis_delivery: '${KinesisIngestionFirehose}'
-            }" > /home/ec2-user/config.js
+            --//
+            Content-Type: text/cloud-config; charset="us-ascii"
+            MIME-Version: 1.0
+            Content-Transfer-Encoding: 7bit
+            Content-Disposition: attachment; filename="cloud-config.txt"
 
-            echo "curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.32.1/install.sh | bash
-            export NVM_DIR="$HOME/.nvm"
-            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            #cloud-config
+            cloud_final_modules:
+            - [scripts-user, always]
+
+            --//
+            Content-Type: text/x-shellscript; charset="us-ascii"
+            MIME-Version: 1.0
+            Content-Transfer-Encoding: 7bit
+            Content-Disposition: attachment; filename="userdata.txt"
+
+            #!/bin/bash
+            
+            mkdir /opt/ec2_twitter_reader
+            export WORK_DIR="/opt/ec2_twitter_reader"
+            
+            echo "#!/bin/bash
+            
+            export WORK_DIR="/opt/ec2_twitter_reader"
+            mkdir \$WORK_DIR
+            
+            cd \$WORK_DIR
+            chmod +rwx \$WORK_DIR
+
+            curl -o- https://raw.githubusercontent.com/creationix/nvm/v0.32.1/install.sh | sudo bash
+            
+            export NVM_DIR="\$HOME/.nvm" >> \$HOME/.bashrc
+            [ -s '\$NVM_DIR/nvm.sh' ] && \. '\$NVM_DIR/nvm.sh' >> \$HOME/.bashrc
+            
+            chmod -R +x \$NVM_DIR
+
+            source \$HOME/.bashrc
+            
             nvm install 10.15.3
             npm install --registry=https://registry.npmjs.org/
             npm install --registry=https://custom.npm.registry.com/
             npm install node-sass request@2.81.0
             
+            cd \$WORK_DIR
             wget ${EC2TwitterCode}
 
-            tar --warning=no-unknown-keyword -xf ec2_twitter_reader.tar -C /home/ec2-user/
+            tar --warning=no-unknown-keyword -xf ec2_twitter_reader.tar -C \$WORK_DIR
+            "> $WORK_DIR/install.sh
+            
+            echo "
+            var config = module.exports = {
+              kinesis_delivery: '${KinesisIngestionFirehose}'
+            }
+            " > $WORK_DIR/config.js
 
-            cd /home/ec2-user
+            echo "#!/bin/bash
+            
+            export WORK_DIR="/opt/ec2_twitter_reader"
+            cd \$WORK_DIR
+            
             nohup node twitter_stream_producer_app.js &
-
             echo 'Service started.'
-            " > /home/ec2-user/start.sh
+            " > $WORK_DIR/run.sh
+            
+            bash -c '$WORK_DIR/install.sh'
+            bash -c '$WORK_DIR/run.sh'
+            --//
           - {
               EC2TwitterCode: !Join ['', ['https://s3.', !Ref 'AWS::Region', '.amazonaws.com/', !Join ['-', [!FindInMap [ Code, EC2Twitter, S3Bucket], !Ref 'AWS::Region']], '/', !FindInMap [ Code, EC2Twitter, S3Key]]],
               KinesisIngestionFirehose: !Ref IngestionFirehoseStream

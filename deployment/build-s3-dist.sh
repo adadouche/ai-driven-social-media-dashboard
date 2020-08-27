@@ -92,3 +92,6 @@ aws s3 cp $(echo $deployment_dir)/dist/addtriggerfunction.zip                   
 aws s3 cp $(echo $deployment_dir)/dist/ec2_twitter_reader.tar                      s3://$1/ai-driven-social-media-dashboard/$2/
 aws s3 cp $(echo $deployment_dir)/dist/socialmediafunction.zip                     s3://$1/ai-driven-social-media-dashboard/$2/
 aws s3 cp $(echo $deployment_dir)/dist/ai-driven-social-media-dashboard.template   s3://$1/ai-driven-social-media-dashboard/$2/
+
+aws s3api put-object-acl --bucket $1-$(aws configure get region) --key ai-driven-social-media-dashboard/$2/ec2_twitter_reader.tar --grant-read uri=http://acs.amazonaws.com/groups/global/AllUsers
+aws s3api put-object-acl --bucket $1                             --key ai-driven-social-media-dashboard/$2/ec2_twitter_reader.tar --grant-read uri=http://acs.amazonaws.com/groups/global/AllUsers
